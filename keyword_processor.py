@@ -11,6 +11,64 @@ class KeywordProcessor:
     def process_pipeline(self, seeds: List[str]) -> List[Dict]:
         print(f"\n🌱 Начинаем обработку {len(seeds)} семян...")
         
+        if self.config.offline_mode:
+            print("\n🔌 OFFLINE режим: работа без API")
+            return self._offline_mode_results(seeds)
+        
+        if self.config.multi_region:
+            print(f"\n🌍 Мульти-регион режим: {len(self.config.regions)} регионов")
+            return self._multi_region_pipeline(seeds)
+        
+        return self._single_region_pipeline(seeds)
+    
+    def _offline_mode_results(self, seeds: List[str]) -> List[Dict]:
+        print(f"\n✅ Сгенерировано {len(seeds)} ключей в offline режиме")
+        results = []
+        for seed in seeds:
+            results.append({
+                "word": seed,
+                "destination_key": seed,
+                "wsk": 0,
+                "ws": 0,
+                "numwords": len(seed.split()),
+                "isquest": 1 if any(q in seed.lower() for q in ["как", "где", "сколько", "что", "какой"]) else 0,
+                "isgeo": 0,
+                "adscnt": 0,
+                "avbid": 0,
+                "docs": 0,
+                "cnt": 0,
+                "offline": True
+            })
+        return results[:self.config.max_results]
+    
+    def _multi_region_pipeline(self, seeds: List[str]) -> List[Dict]:
+        all_results = []
+        
+        print("\n📋 Шаг 1: Получение подсказок по всем регионам...")
+        multi_suggested = self.api.suggest_multi_region(seeds, self.config.regions)
+        
+        all_keywords = list(set(seeds))
+        for region, suggested in multi_suggested.items():
+            print(f"   ✓ Регион {region}: {len(suggested)} подсказок")
+            all_keywords.extend(suggested)
+        
+        all_keywords = list(set(all_keywords))
+        print(f"   ✓ Всего уникальных: {len(all_keywords)}")
+        
+        print(f"\n🔄 Шаг 2: Расширение ключевых фраз...")
+        extended = self._process_extended_keywords(all_keywords)
+        
+        print(f"\n🔍 Шаг 3: Фильтрация и очистка...")
+        filtered = self._filter_keywords(extended)
+        print(f"   ✓ После фильтрации: {len(filtered)} ключей")
+        
+        print(f"\n🎯 Шаг 4: Удаление дублей...")
+        deduplicated = self._deduplicate_keywords(filtered)
+        
+        print(f"\n✅ Обработка завершена!")
+        return deduplicated[:self.config.max_results]
+    
+    def _single_region_pipeline(self, seeds: List[str]) -> List[Dict]:
         print("\n📋 Шаг 1: Получение быстрых подсказок...")
         suggested = self.api.suggest(seeds, self.config.region_id)
         print(f"   ✓ Получено {len(suggested)} подсказок")
@@ -18,9 +76,22 @@ class KeywordProcessor:
         all_keywords = list(set(seeds + suggested))
         
         print(f"\n🔄 Шаг 2: Расширение ключевых фраз...")
+        extended = self._process_extended_keywords(all_keywords)
+        
+        print(f"\n🔍 Шаг 3: Фильтрация и очистка...")
+        filtered = self._filter_keywords(extended)
+        print(f"   ✓ После фильтрации: {len(filtered)} ключей")
+        
+        print(f"\n🎯 Шаг 4: Удаление дублей...")
+        deduplicated = self._deduplicate_keywords(filtered)
+        
+        print(f"\n✅ Обработка завершена!")
+        return deduplicated[:self.config.max_results]
+    
+    def _process_extended_keywords(self, keywords: List[str]) -> List[Dict]:
         uid = self.api.create_extended_keywords(
             base=self.config.base,
-            keywords=all_keywords,
+            keywords=keywords,
             similarity=30,
             delete_duplicate=True,
             additions=True
@@ -32,29 +103,25 @@ class KeywordProcessor:
         print(f"   ✓ Задание создано: {uid}")
         self.api.wait_for_extended_keywords(uid)
         
-        print("\n📥 Шаг 3: Загрузка расширенных ключей...")
+        print("\n📥 Загрузка расширенных ключей...")
         extended = self._fetch_all_keywords(uid)
         print(f"   ✓ Загружено {len(extended)} ключей")
         
-        print("\n🔍 Шаг 4: Фильтрация и очистка...")
-        filtered = self._filter_keywords(extended)
-        print(f"   ✓ После фильтрации: {len(filtered)} ключей")
-        
-        print("\n🎯 Шаг 5: Удаление дублей...")
-        words_only = [kw.get("destination_key") or kw.get("word", "") for kw in filtered]
+        return extended
+    
+    def _deduplicate_keywords(self, keywords: List[Dict]) -> List[Dict]:
+        words_only = [kw.get("destination_key") or kw.get("word", "") for kw in keywords]
         deduplicated_words = self.api.delete_doubles(words_only)
         
         deduplicated = []
         dedup_set = set(deduplicated_words)
-        for kw in filtered:
+        for kw in keywords:
             word = kw.get("destination_key") or kw.get("word", "")
             if word in dedup_set:
                 deduplicated.append(kw)
                 dedup_set.discard(word)
         
         print(f"   ✓ После дедупликации: {len(deduplicated)} ключей")
-        
-        print("\n✅ Обработка завершена!")
         return deduplicated
 
     def _fetch_all_keywords(self, uid: str) -> List[Dict]:

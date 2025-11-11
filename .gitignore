@@ -38,11 +38,13 @@ ENV/
 *~
 
 # Output files
-*.csv
-*.json
-*.txt
+keywords_*.csv
+keywords_*.json
+report_*.txt
 !requirements.txt
 !README.md
+!USAGE.md
+!QUICKSTART.md
 
 # OS
 .DS_Store

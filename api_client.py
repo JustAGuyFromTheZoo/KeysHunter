@@ -60,12 +60,25 @@ class KeysAPIClient:
         return None
 
     def suggest(self, keywords: List[str], region: int) -> List[str]:
+        if not self.api_token:
+            return []
         response = self._request(
             "POST",
             "/tools/suggest",
             json={"list": keywords, "region": region}
         )
         return response.get("keys", []) if response else []
+    
+    def suggest_multi_region(self, keywords: List[str], regions: List[int]) -> Dict[int, List[str]]:
+        if not self.api_token:
+            return {}
+        results = {}
+        for region in regions:
+            print(f"   🌍 Обработка региона {region}...")
+            suggested = self.suggest(keywords, region)
+            if suggested:
+                results[region] = suggested
+        return results
 
     def create_extended_keywords(self, base: str, keywords: List[str], 
                                  similarity: int = 30, 
